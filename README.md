@@ -21,7 +21,15 @@ python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -e ".[preprocess,test]"
+python -m pip install --no-deps facenet-pytorch==2.6.0
 ```
+
+Lệnh MTCNN thứ hai phải có `--no-deps`. `facenet-pytorch 2.6.0` khai báo các
+upper-bound cũ (`torch<2.3`, `Pillow<10.3`, `numpy<2`) nên nếu cài theo dependency
+resolver thông thường, pip sẽ cố hạ Torch/Pillow/NumPy. Đặc biệt trên Python 3.14,
+Pillow 10.2 và NumPy 1.26 không có wheel phù hợp và pip sẽ thất bại khi build từ
+source. Wheel Python thuần của `facenet-pytorch` đã được kiểm tra với Torch 2.13,
+Torchvision 0.28, Pillow 12 và NumPy 2; `--no-deps` giữ nguyên các bản hiện tại.
 
 Máy train cần CUDA. Paper dùng một NVIDIA RTX 3090; cấu hình gốc dùng batch tổng
 32 ảnh (16 cặp fake-real).

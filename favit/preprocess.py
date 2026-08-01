@@ -32,8 +32,11 @@ class MTCNNFaceCropper:
             from facenet_pytorch import MTCNN
         except ImportError as error:
             raise RuntimeError(
-                "Face extraction needs facenet-pytorch. Install with "
-                "`pip install -e .[preprocess]`."
+                "Face extraction needs the facenet-pytorch MTCNN wheel. "
+                "Install the project dependencies first, then run "
+                "`python -m pip install --no-deps facenet-pytorch==2.6.0`. "
+                "Using --no-deps is intentional: facenet-pytorch's old pins "
+                "would otherwise downgrade torch, Pillow, and NumPy."
             ) from error
         self.detector = MTCNN(
             image_size=image_size,

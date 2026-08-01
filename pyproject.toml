@@ -19,7 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-preprocess = ["facenet-pytorch>=2.6"]
+# facenet-pytorch 2.6 has obsolete upper pins on torch, Pillow, and NumPy.
+# Install its pure-Python wheel separately with --no-deps as documented.
+preprocess = ["requests>=2.31"]
 test = ["pytest>=7.4"]
 
 [tool.setuptools.packages.find]
@@ -28,4 +30,3 @@ include = ["favit*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

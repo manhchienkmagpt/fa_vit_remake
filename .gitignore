@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .vendor/
+.compat_test/
 upstream_favit/
 data/
 outputs/
@@ -9,4 +10,3 @@ checkpoints/
 *.pth
 *.pt
 *.tar
-
