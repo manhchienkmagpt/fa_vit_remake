@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -16,7 +18,12 @@ from favit.losses import FineGrainedAdaptiveLoss
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train FA-ViT on paired FF++ face frames")
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--resume", type=Path, default=None)
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="Resume training from a checkpoint (normally outputs/.../last.pt)",
+    )
     parser.add_argument("--device", default=None, help="Override config device, e.g. cuda:0")
     return parser.parse_args()
 
@@ -26,6 +33,45 @@ def save_checkpoint(path: Path, state: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(state, temporary)
     temporary.replace(path)
+
+
+def capture_random_state() -> dict:
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def restore_random_state(state: dict | None) -> None:
+    """Restore RNG state when available while accepting older checkpoints."""
+    if not state:
+        return
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch"].cpu())
+    if "cuda" in state and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["cuda"])
+
+
+def make_frame_loader(
+    manifest: str | Path,
+    data_config: dict,
+    transform: FaceTransform,
+    batch_size: int,
+    device: torch.device,
+) -> DataLoader:
+    dataset = FrameFaceDataset(manifest, data_config["root"], transform)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=int(data_config.get("num_workers", 8)),
+        pin_memory=device.type == "cuda",
+    )
 
 
 def main() -> None:
@@ -58,20 +104,30 @@ def main() -> None:
         drop_last=True,
         collate_fn=paired_collate,
     )
-    val_loader = None
-    if data_config.get("val_frames"):
-        val_dataset = FrameFaceDataset(
-            data_config["val_frames"], data_config["root"], eval_transform
-        )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=image_batch_size,
-            shuffle=False,
-            num_workers=int(data_config.get("num_workers", 8)),
-            pin_memory=device.type == "cuda",
-        )
+    if not data_config.get("val_frames"):
+        raise ValueError("data.val_frames is required to select the best validation AUC")
+    if not data_config.get("celebdf_test_frames"):
+        raise ValueError("data.celebdf_test_frames is required for evaluation during training")
+    val_loader = make_frame_loader(
+        data_config["val_frames"], data_config, eval_transform, image_batch_size, device
+    )
+    celebdf_test_loader = make_frame_loader(
+        data_config["celebdf_test_frames"],
+        data_config,
+        eval_transform,
+        image_batch_size,
+        device,
+    )
 
-    model = build_model_from_config(config["model"]).to(device)
+    resume_value = args.resume or train_config.get("resume")
+    resume_path = Path(resume_value) if resume_value else None
+    if resume_path is not None and not resume_path.is_file():
+        raise FileNotFoundError(f"resume checkpoint does not exist: {resume_path}")
+    # A resume checkpoint already contains the complete model, so avoid loading
+    # or downloading the pretrained backbone before replacing all its weights.
+    model = build_model_from_config(
+        config["model"], pretrained=False if resume_path is not None else None
+    ).to(device)
     print(json.dumps(model.trainable_parameter_summary(), indent=2))
     trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     optimizer = torch.optim.Adam(
@@ -93,17 +149,27 @@ def main() -> None:
     scaler = torch.amp.GradScaler(device.type, enabled=amp_enabled)
 
     start_epoch = 0
-    best_auc = float("-inf")
-    resume = args.resume or train_config.get("resume")
-    if resume:
-        checkpoint = torch.load(resume, map_location=device, weights_only=False)
+    best_validation_auc = float("-inf")
+    if resume_path is not None:
+        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         scheduler.load_state_dict(checkpoint["scheduler"])
         if checkpoint.get("scaler"):
             scaler.load_state_dict(checkpoint["scaler"])
         start_epoch = int(checkpoint["epoch"]) + 1
-        best_auc = float(checkpoint.get("best_auc", best_auc))
+        best_validation_auc = float(
+            checkpoint.get(
+                "best_validation_auc",
+                checkpoint.get("best_auc", best_validation_auc),
+            )
+        )
+        restore_random_state(checkpoint.get("random_state"))
+        print(
+            "resume_checkpoint: "
+            f"path={resume_path} next_epoch={start_epoch + 1} "
+            f"best_validation_auc={best_validation_auc:.6f}"
+        )
 
     history_path = output_dir / "history.jsonl"
     for epoch in range(start_epoch, int(train_config["epochs"])):
@@ -116,35 +182,53 @@ def main() -> None:
         train_metrics = train_one_epoch(
             model, train_loader, optimizer, fal_criterion, fal_weight, device, scaler
         )
-        val_metrics = evaluate_video_level(model, val_loader, device) if val_loader else {}
+        val_metrics = evaluate_video_level(
+            model, val_loader, device, description="validate FF++"
+        )
+        celebdf_test_metrics = evaluate_video_level(
+            model, celebdf_test_loader, device, description="test CelebDF"
+        )
         record = {
             "epoch": epoch + 1,
             "learning_rate": optimizer.param_groups[0]["lr"],
             "fal_weight": fal_weight,
             "train": train_metrics,
             "validation": val_metrics,
+            "celebdf_test": celebdf_test_metrics,
         }
         print(json.dumps(record, indent=2))
         with history_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
 
-        current_auc = float(val_metrics.get("video_auc", -train_metrics["loss"]))
+        current_validation_auc = float(val_metrics["video_auc"])
         # Advance the epoch-based scheduler before serializing so resume starts
         # with exactly the learning rate of the next epoch.
         scheduler.step()
-        improved = current_auc > best_auc
-        best_auc = max(best_auc, current_auc)
+        improved = current_validation_auc > best_validation_auc
+        best_validation_auc = max(best_validation_auc, current_validation_auc)
         state = {
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "scaler": scaler.state_dict(),
-            "best_auc": best_auc,
+            # Keep best_auc for compatibility with checkpoints created by older code.
+            "best_auc": best_validation_auc,
+            "best_validation_auc": best_validation_auc,
+            "validation_metrics": val_metrics,
+            "celebdf_test_metrics": celebdf_test_metrics,
+            "random_state": capture_random_state(),
             "config": config,
         }
         if improved:
-            save_checkpoint(output_dir / "best.pt", state)
+            best_path = output_dir / "best.pt"
+            save_checkpoint(best_path, state)
+            print(
+                "save_best_checkpoint: "
+                f"path={best_path} epoch={epoch + 1} "
+                f"validation_auc={current_validation_auc:.6f} "
+                f"celebdf_test_auc={float(celebdf_test_metrics['video_auc']):.6f}"
+            )
         save_checkpoint(output_dir / "last.pt", state)
 
 

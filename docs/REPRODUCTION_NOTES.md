@@ -26,7 +26,8 @@ bạch sau:
 - không augmentation mặc định; normalization `(x - 0.5) / 0.5` lấy từ demo
   chính thức;
 - MTCNN margin 0, chọn mặt lớn nhất; bỏ frame detect thất bại;
-- seed 42; chọn `best.pt` theo FF++ validation video AUC.
+- seed 42; chọn `best.pt` theo FF++ validation video AUC. Celeb-DF test được đánh
+  giá sau mỗi epoch để theo dõi nhưng không tham gia quyết định lưu `best.pt`.
 
 Vì vậy, kết quả không thể được xem là bit-exact nếu tác giả không công bố phần
 training/data code và seed.
@@ -53,4 +54,3 @@ Tên manipulated video FF++ có dạng `<target>_<source>`. Mỗi fake frame đ�
 với original `<target>` ở cùng sample index. Một batch DataLoader gồm 16 cặp và
 được xếp thành `[16 fake, 16 real]`, đúng giả định split nửa batch trong public
 model code. Cùng một phép biến đổi hình học được áp dụng cho hai phía của cặp.
-

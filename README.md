@@ -146,6 +146,11 @@ Sửa các đường dẫn trong
 python train.py --config configs/favit_ffpp_c23_celebdf.yaml --device cuda:0
 ```
 
+Sau mỗi epoch, vòng train đánh giá cả FF++ validation và Celeb-DF-v2 test ở mức
+video. `best.pt` chỉ được cập nhật khi **FF++ validation video AUC** tăng; Celeb-DF
+test AUC được ghi vào log để theo dõi, không được dùng làm tiêu chí chọn model.
+Khi checkpoint tốt nhất được ghi, terminal sẽ hiện log `save_best_checkpoint`.
+
 Thiết lập theo paper:
 
 | Thành phần | Giá trị |
@@ -162,6 +167,20 @@ Thiết lập theo paper:
 
 Checkpoint `last.pt`, `best.pt` và lịch sử JSONL được ghi vào
 `outputs/favit_ffpp_c23/`.
+
+Để tiếp tục một lần train bị dừng, dùng `last.pt` (khuyến nghị vì đây là trạng
+thái của epoch mới nhất):
+
+```powershell
+python train.py `
+  --config configs/favit_ffpp_c23_celebdf.yaml `
+  --resume outputs/favit_ffpp_c23/last.pt `
+  --device cuda:0
+```
+
+Cũng có thể đặt `train.resume` trong file YAML. Resume khôi phục model, optimizer,
+scheduler, AMP scaler, best validation AUC và trạng thái random; `train.epochs`
+là tổng số epoch mục tiêu, không phải số epoch chạy thêm.
 
 ## 5. Cross-test Celeb-DF-v2
 
