@@ -28,7 +28,7 @@ Máy train cần CUDA. Paper dùng một NVIDIA RTX 3090; cấu hình gốc dùn
 
 ## 2. Cấu trúc dữ liệu đầu vào
 
-FF++ phải theo cấu trúc chính thức:
+Preprocessor hỗ trợ cả cấu trúc FF++ chính thức:
 
 ```text
 FaceForensics++/
@@ -39,6 +39,23 @@ FaceForensics++/
     ├── FaceSwap/c23/videos/*.mp4
     └── NeuralTextures/c23/videos/*.mp4
 ```
+
+và cấu trúc phẳng thường gặp ở Kaggle:
+
+```text
+FaceForensics++-Kaggle/
+├── original/*.mp4
+├── Deepfakes/*.mp4
+├── Face2Face/*.mp4
+├── FaceSwap/*.mp4
+├── NeuralTextures/*.mp4
+├── FaceShifter/*.mp4
+└── DeepFakeDetection/*.mp4
+```
+
+`FaceShifter` và `DeepFakeDetection` không được dùng mặc định vì thí nghiệm chính
+của paper train trên bốn phương pháp FF++: Deepfakes, Face2Face, FaceSwap và
+NeuralTextures.
 
 Celeb-DF-v2:
 
@@ -68,12 +85,34 @@ python -m favit.preprocess ffpp \
   --split-json /data/ffpp_splits/train.json \
   --compression c23 \
   --frames 20
+```
 
+Với layout Kaggle phẳng của repo này, dùng:
+
+```bash
 python -m favit.preprocess ffpp \
-  --root /data/FaceForensics++ \
+  --root /data/FaceForensics-Kaggle \
+  --output data/processed \
+  --split train \
+  --split-json /data/ffpp_splits/train.json \
+  --layout kaggle-flat \
+  --compression c23 \
+  --frames 20
+```
+
+`--layout auto` (mặc định) cũng tự phát hiện layout trên. Với dữ liệu phẳng,
+`--compression c23` dùng để đặt tên output/manifest; preprocessor không đòi hỏi
+thêm thư mục `c23` nếu video nằm trực tiếp trong mỗi folder.
+
+Tiếp tục tạo validation như sau:
+
+```bash
+python -m favit.preprocess ffpp \
+  --root /data/FaceForensics-Kaggle \
   --output data/processed \
   --split val \
   --split-json /data/ffpp_splits/val.json \
+  --layout kaggle-flat \
   --compression c23 \
   --frames 50
 
@@ -144,4 +183,3 @@ python -c "from favit.model import create_favit; m=create_favit('vit_tiny_patch1
 - [Mã FA-ViT chính thức](https://github.com/LoveSiameseCat/FAViT)
 - [FaceForensics++ chính thức](https://github.com/ondyari/FaceForensics)
 - [Celeb-DF-v2 chính thức](https://github.com/yuezunli/celeb-deepfakeforensics)
-

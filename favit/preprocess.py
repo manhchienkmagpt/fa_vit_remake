@@ -117,6 +117,86 @@ def _video_directory(base: Path) -> Path:
     return videos if videos.exists() else base
 
 
+def _contains_videos(directory: Path) -> bool:
+    return directory.is_dir() and any(
+        path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+        for path in directory.iterdir()
+    )
+
+
+def _first_video_directory(candidates: list[Path], description: str) -> Path:
+    for candidate in candidates:
+        if _contains_videos(candidate):
+            return candidate
+    searched = "\n  - ".join(str(path) for path in candidates)
+    raise FileNotFoundError(f"cannot find {description} videos; searched:\n  - {searched}")
+
+
+def resolve_ffpp_directories(
+    root: Path,
+    compression: str,
+    methods: list[str],
+    layout: str = "auto",
+) -> tuple[Path, dict[str, Path], str]:
+    """Resolve official FF++ or Kaggle flat-layout video directories."""
+
+    official_original_candidates = [
+        root / "original_sequences" / "youtube" / compression / "videos",
+        root / "original_sequences" / "youtube" / compression,
+    ]
+    flat_original_candidates = [
+        root / "original",
+        root / "original" / "videos",
+        root / "original" / compression,
+        root / "original" / compression / "videos",
+    ]
+
+    if layout == "auto":
+        if any(_contains_videos(path) for path in official_original_candidates):
+            layout = "official"
+        elif any(_contains_videos(path) for path in flat_original_candidates):
+            layout = "kaggle-flat"
+        else:
+            raise FileNotFoundError(
+                "cannot auto-detect FF++ layout: neither official "
+                "original_sequences/youtube nor flat original contains videos"
+            )
+
+    if layout == "official":
+        original_directory = _first_video_directory(
+            official_original_candidates, "official FF++ original"
+        )
+        method_directories = {
+            method: _first_video_directory(
+                [
+                    root / "manipulated_sequences" / method / compression / "videos",
+                    root / "manipulated_sequences" / method / compression,
+                ],
+                f"official FF++ {method}",
+            )
+            for method in methods
+        }
+    elif layout == "kaggle-flat":
+        original_directory = _first_video_directory(
+            flat_original_candidates, "Kaggle FF++ original"
+        )
+        method_directories = {
+            method: _first_video_directory(
+                [
+                    root / method,
+                    root / method / "videos",
+                    root / method / compression,
+                    root / method / compression / "videos",
+                ],
+                f"Kaggle FF++ {method}",
+            )
+            for method in methods
+        }
+    else:
+        raise ValueError(f"unsupported FF++ layout: {layout}")
+    return original_directory, method_directories, layout
+
+
 def _write_csv(path: Path, rows: list[dict[str, object]], fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -133,14 +213,15 @@ def preprocess_ffpp(args: argparse.Namespace) -> None:
     if not all(isinstance(pair, list) and len(pair) == 2 for pair in split_pairs):
         raise ValueError("FF++ split JSON must contain [target, source] pairs")
 
-    originals = _find_videos(
-        _video_directory(root / "original_sequences" / "youtube" / args.compression)
+    original_directory, method_directories, detected_layout = resolve_ffpp_directories(
+        root, args.compression, args.methods, args.layout
     )
+    LOGGER.info("Using FF++ layout: %s", detected_layout)
+    LOGGER.info("Original videos: %s", original_directory)
+    originals = _find_videos(original_directory)
     manipulation_videos = {
-        method: _find_videos(
-            _video_directory(root / "manipulated_sequences" / method / args.compression)
-        )
-        for method in args.methods
+        method: _find_videos(directory)
+        for method, directory in method_directories.items()
     }
     cropper = MTCNNFaceCropper(args.image_size, args.margin, args.device)
     selected_ids = sorted({str(item) for pair in split_pairs for item in pair})
@@ -319,6 +400,12 @@ def parse_args() -> argparse.Namespace:
     ffpp.add_argument("--split", choices=("train", "val", "test"), required=True)
     ffpp.add_argument("--split-json", required=True, type=Path)
     ffpp.add_argument("--compression", choices=("c23", "c40", "raw"), default="c23")
+    ffpp.add_argument(
+        "--layout",
+        choices=("auto", "official", "kaggle-flat"),
+        default="auto",
+        help="dataset directory layout; auto supports official and root/<method> Kaggle layouts",
+    )
     ffpp.add_argument(
         "--methods",
         nargs="+",
