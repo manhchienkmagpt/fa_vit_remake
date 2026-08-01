@@ -16,13 +16,16 @@ từ paper và giao thức dataset chính thức. Các giả định còn thiế
 
 ## 1. Thiết lập
 
-```bash
+```powershell
 python -m venv .venv
-# Linux/macOS: source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
 pip install -e ".[preprocess,test]"
 python -m pip install --no-deps facenet-pytorch==2.6.0
 ```
+
+Các lệnh nhiều dòng trong tài liệu ưu tiên **Windows PowerShell** và dùng
+backtick `` ` `` để nối dòng. Nếu dùng Bash/Linux, thay backtick bằng `\` và đổi
+đường dẫn Windows sang đường dẫn Linux.
 
 Lệnh MTCNN thứ hai phải có `--no-deps`. `facenet-pytorch 2.6.0` khai báo các
 upper-bound cũ (`torch<2.3`, `Pillow<10.3`, `numpy<2`) nên nếu cài theo dependency
@@ -85,26 +88,26 @@ frame/video khi test. Lệnh dưới đây đồng thời tạo face crops và m
 trọng nhất, manifest train ghép fake video `<target>_<source>` với original
 `<target>` ở cùng vị trí thời gian để FAL nhận đúng fine-grained pair.
 
-```bash
-python -m favit.preprocess ffpp \
-  --root /data/FaceForensics++ \
-  --output data/processed \
-  --split train \
-  --split-json /data/ffpp_splits/train.json \
-  --compression c23 \
+```powershell
+python -m favit.preprocess ffpp `
+  --root "D:\datasets\FaceForensics++" `
+  --output "data\processed" `
+  --split train `
+  --split-json "D:\datasets\ffpp_splits\train.json" `
+  --compression c23 `
   --frames 20
 ```
 
 Với layout Kaggle phẳng của repo này, dùng:
 
-```bash
-python -m favit.preprocess ffpp \
-  --root /data/FaceForensics-Kaggle \
-  --output data/processed \
-  --split train \
-  --split-json /data/ffpp_splits/train.json \
-  --layout kaggle-flat \
-  --compression c23 \
+```powershell
+python -m favit.preprocess ffpp `
+  --root "D:\datasets\FaceForensics-Kaggle" `
+  --output "data\processed" `
+  --split train `
+  --split-json "D:\datasets\ffpp_splits\train.json" `
+  --layout kaggle-flat `
+  --compression c23 `
   --frames 20
 ```
 
@@ -114,20 +117,20 @@ thêm thư mục `c23` nếu video nằm trực tiếp trong mỗi folder.
 
 Tiếp tục tạo validation như sau:
 
-```bash
-python -m favit.preprocess ffpp \
-  --root /data/FaceForensics-Kaggle \
-  --output data/processed \
-  --split val \
-  --split-json /data/ffpp_splits/val.json \
-  --layout kaggle-flat \
-  --compression c23 \
+```powershell
+python -m favit.preprocess ffpp `
+  --root "D:\datasets\FaceForensics-Kaggle" `
+  --output "data\processed" `
+  --split val `
+  --split-json "D:\datasets\ffpp_splits\val.json" `
+  --layout kaggle-flat `
+  --compression c23 `
   --frames 50
 
-python -m favit.preprocess celebdf \
-  --root /data/Celeb-DF-v2 \
-  --output data/processed \
-  --test-list /data/Celeb-DF-v2/List_of_testing_videos.txt \
+python -m favit.preprocess celebdf `
+  --root "D:\datasets\Celeb-DF-v2" `
+  --output "data\processed" `
+  --test-list "D:\datasets\Celeb-DF-v2\List_of_testing_videos.txt" `
   --frames 50
 ```
 
@@ -139,7 +142,7 @@ và loại khỏi manifest. Chạy lại không có `--overwrite` sẽ tái sử
 Sửa các đường dẫn trong
 [configs/favit_ffpp_c23_celebdf.yaml](configs/favit_ffpp_c23_celebdf.yaml), rồi:
 
-```bash
+```powershell
 python train.py --config configs/favit_ffpp_c23_celebdf.yaml --device cuda:0
 ```
 
@@ -162,10 +165,10 @@ Checkpoint `last.pt`, `best.pt` và lịch sử JSONL được ghi vào
 
 ## 5. Cross-test Celeb-DF-v2
 
-```bash
-python evaluate.py \
-  --config configs/favit_ffpp_c23_celebdf.yaml \
-  --checkpoint outputs/favit_ffpp_c23/best.pt \
+```powershell
+python evaluate.py `
+  --config "configs\favit_ffpp_c23_celebdf.yaml" `
+  --checkpoint "outputs\favit_ffpp_c23\best.pt" `
   --device cuda:0
 ```
 
@@ -176,13 +179,13 @@ trị được hard-code.
 
 ## 6. Kiểm thử
 
-```bash
+```powershell
 pytest
 ```
 
 Để sanity-check nhanh model không tải pretrained weights:
 
-```bash
+```powershell
 python -c "from favit.model import create_favit; m=create_favit('vit_tiny_patch16_224', False); print(m.trainable_parameter_summary())"
 ```
 
