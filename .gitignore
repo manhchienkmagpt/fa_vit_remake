@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.vendor/
+upstream_favit/
+data/
+outputs/
+checkpoints/
+*.pth
+*.pt
+*.tar
+

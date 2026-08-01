@@ -1,0 +1,40 @@
+seed: 42
+device: cuda
+output_dir: outputs/favit_ffpp_c23
+
+data:
+  root: data/processed
+  train_pairs: data/processed/manifests/ffpp_c23_train_pairs.csv
+  val_frames: data/processed/manifests/ffpp_c23_val_frames.csv
+  celebdf_test_frames: data/processed/manifests/celebdf_test_frames.csv
+  image_size: 224
+  num_workers: 8
+  horizontal_flip: 0.0  # augmentation was not specified in the paper
+
+model:
+  backbone: vit_base_patch16_224.augreg_in21k
+  pretrained: true
+  num_classes: 2
+  gam_reduction: 2
+  inject_layers: [0, 3, 6]
+  # Matches the authors' released implementation. The paper broadly describes
+  # the pre-trained ViT blocks as frozen; see docs/REPRODUCTION_NOTES.md.
+  train_backbone_norms: true
+  train_cls_token: true
+
+loss:
+  fal_margin: 0.25
+  fal_scale: 24.0
+  fal_weight_after_warmup: 1.0
+  fal_warmup_epochs: 1
+
+train:
+  epochs: 20  # not reported by the paper; explicit reproduction default
+  image_batch_size: 32  # 16 fake-real pairs = 32 images
+  learning_rate: 0.00003
+  weight_decay: 0.00001
+  lr_step_size: 5
+  lr_gamma: 0.5
+  amp: true
+  resume: null
+
