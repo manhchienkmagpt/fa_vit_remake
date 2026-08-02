@@ -9,11 +9,11 @@ from train import capture_random_state, restore_random_state, save_checkpoint
 def test_checkpoint_is_saved_atomically(tmp_path):
     checkpoint_path = tmp_path / "best.pt"
 
-    save_checkpoint(checkpoint_path, {"epoch": 3, "best_validation_auc": 0.91})
+    save_checkpoint(checkpoint_path, {"epoch": 3, "best_celebdf_auc": 0.91})
 
     checkpoint = torch.load(checkpoint_path, weights_only=False)
     assert checkpoint["epoch"] == 3
-    assert checkpoint["best_validation_auc"] == 0.91
+    assert checkpoint["best_celebdf_auc"] == 0.91
     assert not (tmp_path / "best.pt.tmp").exists()
 
 

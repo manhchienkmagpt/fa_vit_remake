@@ -115,18 +115,9 @@ python -m favit.preprocess ffpp `
 `--compression c23` dùng để đặt tên output/manifest; preprocessor không đòi hỏi
 thêm thư mục `c23` nếu video nằm trực tiếp trong mỗi folder.
 
-Tiếp tục tạo validation như sau:
+Tiếp tục tạo manifest Celeb-DF test như sau:
 
 ```powershell
-python -m favit.preprocess ffpp `
-  --root "D:\datasets\FaceForensics-Kaggle" `
-  --output "data\processed" `
-  --split val `
-  --split-json "D:\datasets\ffpp_splits\val.json" `
-  --layout kaggle-flat `
-  --compression c23 `
-  --frames 50
-
 python -m favit.preprocess celebdf `
   --root "D:\datasets\Celeb-DF-v2" `
   --output "data\processed" `
@@ -146,9 +137,8 @@ Sửa các đường dẫn trong
 python train.py --config configs/favit_ffpp_c23_celebdf.yaml --device cuda:0
 ```
 
-Sau mỗi epoch, vòng train đánh giá cả FF++ validation và Celeb-DF-v2 test ở mức
-video. `best.pt` chỉ được cập nhật khi **FF++ validation video AUC** tăng; Celeb-DF
-test AUC được ghi vào log để theo dõi, không được dùng làm tiêu chí chọn model.
+Sau mỗi epoch, vòng train chỉ đánh giá Celeb-DF-v2 test ở mức video, không chạy
+FF++ validation. `best.pt` được cập nhật khi **Celeb-DF test video AUC** tăng.
 Khi checkpoint tốt nhất được ghi, terminal sẽ hiện log `save_best_checkpoint`.
 
 Thiết lập theo paper:
@@ -179,7 +169,7 @@ python train.py `
 ```
 
 Cũng có thể đặt `train.resume` trong file YAML. Resume khôi phục model, optimizer,
-scheduler, AMP scaler, best validation AUC và trạng thái random; `train.epochs`
+scheduler, AMP scaler, best Celeb-DF AUC và trạng thái random; `train.epochs`
 là tổng số epoch mục tiêu, không phải số epoch chạy thêm.
 
 ## 5. Cross-test Celeb-DF-v2

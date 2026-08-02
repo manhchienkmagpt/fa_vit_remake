@@ -26,8 +26,8 @@ bạch sau:
 - không augmentation mặc định; normalization `(x - 0.5) / 0.5` lấy từ demo
   chính thức;
 - MTCNN margin 0, chọn mặt lớn nhất; bỏ frame detect thất bại;
-- seed 42; chọn `best.pt` theo FF++ validation video AUC. Celeb-DF test được đánh
-  giá sau mỗi epoch để theo dõi nhưng không tham gia quyết định lưu `best.pt`.
+- seed 42; không chạy FF++ validation trong vòng train; chọn `best.pt` theo
+  Celeb-DF test video AUC sau mỗi epoch.
 
 Vì vậy, kết quả không thể được xem là bit-exact nếu tác giả không công bố phần
 training/data code và seed.

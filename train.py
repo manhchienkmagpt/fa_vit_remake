@@ -104,13 +104,8 @@ def main() -> None:
         drop_last=True,
         collate_fn=paired_collate,
     )
-    if not data_config.get("val_frames"):
-        raise ValueError("data.val_frames is required to select the best validation AUC")
     if not data_config.get("celebdf_test_frames"):
         raise ValueError("data.celebdf_test_frames is required for evaluation during training")
-    val_loader = make_frame_loader(
-        data_config["val_frames"], data_config, eval_transform, image_batch_size, device
-    )
     celebdf_test_loader = make_frame_loader(
         data_config["celebdf_test_frames"],
         data_config,
@@ -149,7 +144,7 @@ def main() -> None:
     scaler = torch.amp.GradScaler(device.type, enabled=amp_enabled)
 
     start_epoch = 0
-    best_validation_auc = float("-inf")
+    best_celebdf_auc = float("-inf")
     if resume_path is not None:
         checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model"])
@@ -158,18 +153,18 @@ def main() -> None:
         if checkpoint.get("scaler"):
             scaler.load_state_dict(checkpoint["scaler"])
         start_epoch = int(checkpoint["epoch"]) + 1
-        best_validation_auc = float(
-            checkpoint.get(
-                "best_validation_auc",
-                checkpoint.get("best_auc", best_validation_auc),
-            )
-        )
+        best_celebdf_auc = float(checkpoint.get("best_celebdf_auc", best_celebdf_auc))
         restore_random_state(checkpoint.get("random_state"))
         print(
             "resume_checkpoint: "
             f"path={resume_path} next_epoch={start_epoch + 1} "
-            f"best_validation_auc={best_validation_auc:.6f}"
+            f"best_celebdf_auc={best_celebdf_auc:.6f}"
         )
+        if "best_celebdf_auc" not in checkpoint:
+            print(
+                "resume_checkpoint: best_celebdf_auc is unavailable in this older "
+                "checkpoint; the best CelebDF AUC is reset"
+            )
 
     history_path = output_dir / "history.jsonl"
     for epoch in range(start_epoch, int(train_config["epochs"])):
@@ -182,9 +177,6 @@ def main() -> None:
         train_metrics = train_one_epoch(
             model, train_loader, optimizer, fal_criterion, fal_weight, device, scaler
         )
-        val_metrics = evaluate_video_level(
-            model, val_loader, device, description="validate FF++"
-        )
         celebdf_test_metrics = evaluate_video_level(
             model, celebdf_test_loader, device, description="test CelebDF"
         )
@@ -193,29 +185,27 @@ def main() -> None:
             "learning_rate": optimizer.param_groups[0]["lr"],
             "fal_weight": fal_weight,
             "train": train_metrics,
-            "validation": val_metrics,
             "celebdf_test": celebdf_test_metrics,
         }
         print(json.dumps(record, indent=2))
         with history_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
 
-        current_validation_auc = float(val_metrics["video_auc"])
+        current_celebdf_auc = float(celebdf_test_metrics["video_auc"])
         # Advance the epoch-based scheduler before serializing so resume starts
         # with exactly the learning rate of the next epoch.
         scheduler.step()
-        improved = current_validation_auc > best_validation_auc
-        best_validation_auc = max(best_validation_auc, current_validation_auc)
+        improved = current_celebdf_auc > best_celebdf_auc
+        best_celebdf_auc = max(best_celebdf_auc, current_celebdf_auc)
         state = {
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "scaler": scaler.state_dict(),
-            # Keep best_auc for compatibility with checkpoints created by older code.
-            "best_auc": best_validation_auc,
-            "best_validation_auc": best_validation_auc,
-            "validation_metrics": val_metrics,
+            # Keep best_auc as a generic alias for external checkpoint consumers.
+            "best_auc": best_celebdf_auc,
+            "best_celebdf_auc": best_celebdf_auc,
             "celebdf_test_metrics": celebdf_test_metrics,
             "random_state": capture_random_state(),
             "config": config,
@@ -226,8 +216,7 @@ def main() -> None:
             print(
                 "save_best_checkpoint: "
                 f"path={best_path} epoch={epoch + 1} "
-                f"validation_auc={current_validation_auc:.6f} "
-                f"celebdf_test_auc={float(celebdf_test_metrics['video_auc']):.6f}"
+                f"celebdf_test_auc={current_celebdf_auc:.6f}"
             )
         save_checkpoint(output_dir / "last.pt", state)
 
