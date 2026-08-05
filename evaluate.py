@@ -7,13 +7,13 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from favit.config import build_model_from_config, load_config, resolve_device
-from favit.data import FaceTransform, FrameFaceDataset
-from favit.engine import evaluate_video_level
+from favit_m2tr.config import build_model_from_config, load_config, resolve_device
+from favit_m2tr.data import FaceTransform, FrameFaceDataset
+from favit_m2tr.engine import evaluate_video_level
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Video-level FA-ViT evaluation")
+    parser = argparse.ArgumentParser(description="Video-level FA-ViT/M2TR evaluation")
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--manifest", type=Path, default=None)
@@ -51,4 +51,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

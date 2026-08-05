@@ -1,6 +1,6 @@
 import torch
 
-from favit.losses import FineGrainedAdaptiveLoss
+from favit_m2tr.losses import FineGrainedAdaptiveLoss
 
 
 def test_fal_rewards_aligned_real_and_separated_fake():
@@ -25,4 +25,3 @@ def test_fal_accepts_batched_prototype():
     fake = torch.randn(3, 8)
     prototype = torch.randn(3, 8)
     assert criterion(prototype, real, fake).ndim == 0
-

@@ -32,9 +32,9 @@ def resolve_device(requested: str) -> torch.device:
 
 
 def build_model_from_config(model_config: dict[str, Any], pretrained: bool | None = None):
-    from .model import create_favit
+    from .model import create_favit_m2tr
 
-    return create_favit(
+    return create_favit_m2tr(
         model_name=model_config["backbone"],
         pretrained=model_config.get("pretrained", True) if pretrained is None else pretrained,
         num_classes=model_config.get("num_classes", 2),
@@ -42,5 +42,11 @@ def build_model_from_config(model_config: dict[str, Any], pretrained: bool | Non
         inject_layers=model_config.get("inject_layers", [0, 3, 6]),
         train_backbone_norms=model_config.get("train_backbone_norms", True),
         train_cls_token=model_config.get("train_cls_token", True),
+        image_size=model_config.get("image_size", 224),
+        m2tr_channels=model_config.get("m2tr_channels", 64),
+        m2tr_depth=model_config.get("m2tr_depth", 4),
+        m2tr_patch_sizes=model_config.get("m2tr_patch_sizes"),
+        m2tr_fusion_hidden_channels=model_config.get("m2tr_fusion_hidden_channels"),
+        m2tr_fusion_pool_size=model_config.get("m2tr_fusion_pool_size", 14),
+        m2tr_dropout=model_config.get("m2tr_dropout", 0.0),
     )
-

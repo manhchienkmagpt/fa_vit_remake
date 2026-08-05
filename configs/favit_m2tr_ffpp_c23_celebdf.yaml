@@ -1,13 +1,13 @@
 seed: 42
 device: cuda
-output_dir: outputs/favit_ffpp_c23
+output_dir: outputs/favit_m2tr_ffpp_c23
 
 data:
   root: "E:\\Deepfake_Data_Chien\\ffpp_celebdf_data\\processed"
   train_pairs: "E:\\Deepfake_Data_Chien\\ffpp_celebdf_data\\processed\\manifests\\ffpp_c23_train_pairs.csv"
   celebdf_test_frames: "E:\\Deepfake_Data_Chien\\ffpp_celebdf_data\\processed\\manifests\\celebdf_test_frames.csv"
   image_size: 224
-  num_workers: 8
+  num_workers: 4
   horizontal_flip: 0.0  # augmentation was not specified in the paper
 
 model:
@@ -20,6 +20,15 @@ model:
   # the pre-trained ViT blocks as frozen; see docs/REPRODUCTION_NOTES.md.
   train_backbone_norms: true
   train_cls_token: true
+  image_size: 224
+  # M2TR runs on FA-ViT's H/4 spatial map (56x56 at this resolution).
+  m2tr_channels: 64
+  m2tr_depth: 4
+  m2tr_patch_sizes: [56, 28, 14, 7]
+  m2tr_fusion_hidden_channels: 32
+  # Pool only frequency K/V to bound CMF memory; RGB queries stay 56x56.
+  m2tr_fusion_pool_size: 14
+  m2tr_dropout: 0.0
 
 loss:
   fal_margin: 0.25
@@ -29,12 +38,13 @@ loss:
 
 train:
   epochs: 30  # not reported by the paper; explicit reproduction default
-  image_batch_size: 32  # 16 fake-real pairs = 32 images
+  # The four M2TR stages add activation memory. Increase after measuring VRAM.
+  image_batch_size: 16  # 8 fake-real pairs = 16 images
   learning_rate: 0.00003
   weight_decay: 0.00001
   lr_step_size: 5
   lr_gamma: 0.5
   amp: true
-  # Set this to outputs/favit_ffpp_c23/last.pt, or pass --resume on the CLI,
+  # Set this to outputs/favit_m2tr_ffpp_c23/last.pt, or pass --resume on the CLI,
   # to continue from a previous run.
   resume: null

@@ -9,20 +9,28 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from favit.config import build_model_from_config, load_config, resolve_device, seed_everything
-from favit.data import FaceTransform, FrameFaceDataset, PairedFaceDataset, paired_collate
-from favit.engine import evaluate_video_level, train_one_epoch
-from favit.losses import FineGrainedAdaptiveLoss
+from favit_m2tr.config import build_model_from_config, load_config, resolve_device, seed_everything
+from favit_m2tr.data import FaceTransform, FrameFaceDataset, PairedFaceDataset, paired_collate
+from favit_m2tr.engine import evaluate_video_level, train_one_epoch
+from favit_m2tr.losses import FineGrainedAdaptiveLoss
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train FA-ViT on paired FF++ face frames")
+    parser = argparse.ArgumentParser(
+        description="Train FA-ViT/M2TR on paired FF++ face frames"
+    )
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument(
         "--resume",
         type=Path,
         default=None,
         help="Resume training from a checkpoint (normally outputs/.../last.pt)",
+    )
+    parser.add_argument(
+        "--init-favit",
+        type=Path,
+        default=None,
+        help="Initialize shared weights from a fa_vit_remake checkpoint",
     )
     parser.add_argument("--device", default=None, help="Override config device, e.g. cuda:0")
     return parser.parse_args()
@@ -116,13 +124,34 @@ def main() -> None:
 
     resume_value = args.resume or train_config.get("resume")
     resume_path = Path(resume_value) if resume_value else None
+    if resume_path is not None and args.init_favit is not None:
+        raise ValueError("--resume and --init-favit are mutually exclusive")
     if resume_path is not None and not resume_path.is_file():
         raise FileNotFoundError(f"resume checkpoint does not exist: {resume_path}")
+    if args.init_favit is not None and not args.init_favit.is_file():
+        raise FileNotFoundError(
+            f"FA-ViT initialization checkpoint does not exist: {args.init_favit}"
+        )
     # A resume checkpoint already contains the complete model, so avoid loading
     # or downloading the pretrained backbone before replacing all its weights.
     model = build_model_from_config(
-        config["model"], pretrained=False if resume_path is not None else None
+        config["model"],
+        pretrained=False
+        if resume_path is not None or args.init_favit is not None
+        else None,
     ).to(device)
+    if args.init_favit is not None:
+        initial_checkpoint = torch.load(
+            args.init_favit, map_location=device, weights_only=False
+        )
+        initial_state = initial_checkpoint.get("model", initial_checkpoint)
+        incompatible = model.load_state_dict(initial_state, strict=False)
+        print(
+            "init_favit_checkpoint: "
+            f"path={args.init_favit} loaded={len(initial_state)} "
+            f"missing={len(incompatible.missing_keys)} "
+            f"unexpected={len(incompatible.unexpected_keys)}"
+        )
     print(json.dumps(model.trainable_parameter_summary(), indent=2))
     trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     optimizer = torch.optim.Adam(

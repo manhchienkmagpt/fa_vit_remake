@@ -3,7 +3,7 @@ import csv
 import torch
 from PIL import Image
 
-from favit.data import FaceTransform, PairedFaceDataset, paired_collate
+from favit_m2tr.data import FaceTransform, PairedFaceDataset, paired_collate
 
 
 def test_paired_dataset_and_collate(tmp_path):
@@ -19,4 +19,3 @@ def test_paired_dataset_and_collate(tmp_path):
     assert images.shape == (2, 3, 224, 224)
     assert torch.equal(labels, torch.tensor([1, 0]))
     assert pair_count.item() == 1
-

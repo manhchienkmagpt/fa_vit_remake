@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "favit-reproduction"
+name = "favit-m2tr"
 version = "0.1.0"
-description = "Paper-oriented FA-ViT reproduction for FF++ to Celeb-DF evaluation"
+description = "FA-ViT enhanced with M2TR multi-scale frequency fusion"
 requires-python = ">=3.10"
 dependencies = [
   "torch>=2.1",
@@ -25,7 +25,7 @@ preprocess = ["requests>=2.31"]
 test = ["pytest>=7.4"]
 
 [tool.setuptools.packages.find]
-include = ["favit*"]
+include = ["favit_m2tr*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

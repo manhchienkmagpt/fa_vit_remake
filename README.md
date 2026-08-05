@@ -1,205 +1,121 @@
-# FA-ViT reproduction: FF++ C23 -> Celeb-DF-v2
+# favit_m2tr
 
-Repository này tái hiện pipeline chính của **Forgery-Aware Adaptive Learning With
-Vision Transformer for Generalized Face Forgery Detection** (IEEE TCSVT 2025),
-tập trung vào:
+`favit_m2tr` là phiên bản nâng cấp của `fa_vit_remake`, kết hợp các adapter GAM/LAM
+và Fine-grained Adaptive Loss (FAL) của FA-ViT với ba thành phần cốt lõi từ
+[M2TR](https://arxiv.org/abs/2104.09770): attention đa tỉ lệ, bộ lọc tần số học
+được và fusion chéo RGB–frequency. Mã M2TR được đối chiếu với
+[implementation chính thức](https://github.com/wdrink/M2TR-Multi-modal-Multi-scale-Transformers-for-Deepfake-Detection).
 
-- train trên FaceForensics++ (FF++) C23 với bốn kiểu giả mạo;
-- giữ backbone ViT-B/16 ImageNet-21K và học GAM/LAM;
-- huấn luyện bằng Cross Entropy + Fine-grained Adaptive Learning (FAL);
-- cross-test trên official test split của Celeb-DF-v2 ở mức video.
+Đây là thiết kế tích hợp FA-ViT + M2TR, không phải bản chép nguyên model M2TR. Pipeline
+crop, manifest cặp fake-real, FAL, checkpoint/resume và video-level Celeb-DF evaluation
+được giữ tương thích với `fa_vit_remake`.
 
-Mã công bố của tác giả chỉ có model/evaluation demo. Phần preprocess, ghép cặp,
-training loop, checkpoint và video-level evaluation trong repo này được dựng lại
-từ paper và giao thức dataset chính thức. Các giả định còn thiếu được ghi rõ tại
-[docs/REPRODUCTION_NOTES.md](docs/REPRODUCTION_NOTES.md).
+## Kiến trúc
 
-## 1. Thiết lập
+```text
+face RGB 224x224
+  ├─ ViT-B/16 + GAM ───────────────────────────────────────────┐
+  └─ FA-ViT spatial stem (56x56)                               │
+       ├─ SpatialCNN → LAM tại ViT block 0, 3, 6 ──────────────┤
+       └─ 4 × [multi-scale patch attention                     │
+              → learnable FFT filter                           │
+              → cross-modal RGB/frequency fusion]              │
+              → 14x14 token context → gated injectors ─────────┤
+                                                               └─ CLS → head
+```
+
+- Mỗi M2TR attention block chia kênh thành bốn head với patch `56, 28, 14, 7`,
+  tương ứng nhiều mức không gian trên feature map `H/4`.
+- Frequency branch dùng `rfft2`, trọng số phức học được và `irfft2`; FFT luôn chạy
+  FP32 để ổn định khi bật AMP.
+- CMF giữ RGB query ở `56x56`, nhưng mặc định pool frequency key/value về `14x14`
+  để giảm activation memory. Đặt `m2tr_fusion_pool_size: null` để dùng full CMF như
+  implementation M2TR.
+- Ba M2TR injector độc lập có residual scale khởi tạo bằng 0. Vì vậy có thể khởi tạo
+  phần dùng chung từ checkpoint FA-ViT mà không làm đổi đột ngột biểu diễn pretrained.
+
+Chi tiết các quyết định tích hợp nằm trong
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Cài đặt
 
 ```powershell
+cd fa_vit_m2tr
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[preprocess,test]"
 python -m pip install --no-deps facenet-pytorch==2.6.0
 ```
 
-Các lệnh nhiều dòng trong tài liệu ưu tiên **Windows PowerShell** và dùng
-backtick `` ` `` để nối dòng. Nếu dùng Bash/Linux, thay backtick bằng `\` và đổi
-đường dẫn Windows sang đường dẫn Linux.
+## Dữ liệu
 
-Lệnh MTCNN thứ hai phải có `--no-deps`. `facenet-pytorch 2.6.0` khai báo các
-upper-bound cũ (`torch<2.3`, `Pillow<10.3`, `numpy<2`) nên nếu cài theo dependency
-resolver thông thường, pip sẽ cố hạ Torch/Pillow/NumPy. Đặc biệt trên Python 3.14,
-Pillow 10.2 và NumPy 1.26 không có wheel phù hợp và pip sẽ thất bại khi build từ
-source. Wheel Python thuần của `facenet-pytorch` đã được kiểm tra với Torch 2.13,
-Torchvision 0.28, Pillow 12 và NumPy 2; `--no-deps` giữ nguyên các bản hiện tại.
-
-Máy train cần CUDA. Paper dùng một NVIDIA RTX 3090; cấu hình gốc dùng batch tổng
-32 ảnh (16 cặp fake-real).
-
-## 2. Cấu trúc dữ liệu đầu vào
-
-Preprocessor hỗ trợ cả cấu trúc FF++ chính thức:
-
-```text
-FaceForensics++/
-├── original_sequences/youtube/c23/videos/*.mp4
-└── manipulated_sequences/
-    ├── Deepfakes/c23/videos/*.mp4
-    ├── Face2Face/c23/videos/*.mp4
-    ├── FaceSwap/c23/videos/*.mp4
-    └── NeuralTextures/c23/videos/*.mp4
-```
-
-và cấu trúc phẳng thường gặp ở Kaggle:
-
-```text
-FaceForensics++-Kaggle/
-├── original/*.mp4
-├── Deepfakes/*.mp4
-├── Face2Face/*.mp4
-├── FaceSwap/*.mp4
-├── NeuralTextures/*.mp4
-├── FaceShifter/*.mp4
-└── DeepFakeDetection/*.mp4
-```
-
-`FaceShifter` và `DeepFakeDetection` không được dùng mặc định vì thí nghiệm chính
-của paper train trên bốn phương pháp FF++: Deepfakes, Face2Face, FaceSwap và
-NeuralTextures.
-
-Celeb-DF-v2:
-
-```text
-Celeb-DF-v2/
-├── Celeb-real/*.mp4
-├── YouTube-real/*.mp4
-├── Celeb-synthesis/*.mp4
-└── List_of_testing_videos.txt
-```
-
-Dùng `train.json`, `val.json`, `test.json` từ
-[official FF++ splits](https://github.com/ondyari/FaceForensics/tree/master/dataset/splits).
-
-## 3. Trích khuôn mặt và tạo manifest
-
-Paper dùng MTCNN, resize `224x224`, lấy 20 frame/video khi train và 50
-frame/video khi test. Lệnh dưới đây đồng thời tạo face crops và manifest. Quan
-trọng nhất, manifest train ghép fake video `<target>_<source>` với original
-`<target>` ở cùng vị trí thời gian để FAL nhận đúng fine-grained pair.
+Có thể dùng thẳng face crops và manifests đã tạo bởi `fa_vit_remake`. Nếu cần tạo lại:
 
 ```powershell
-python -m favit.preprocess ffpp `
+python -m favit_m2tr.preprocess ffpp `
   --root "D:\datasets\FaceForensics++" `
   --output "data\processed" `
   --split train `
   --split-json "D:\datasets\ffpp_splits\train.json" `
   --compression c23 `
   --frames 20
-```
 
-Với layout Kaggle phẳng của repo này, dùng:
-
-```powershell
-python -m favit.preprocess ffpp `
-  --root "D:\datasets\FaceForensics-Kaggle" `
-  --output "data\processed" `
-  --split train `
-  --split-json "D:\datasets\ffpp_splits\train.json" `
-  --layout kaggle-flat `
-  --compression c23 `
-  --frames 20
-```
-
-`--layout auto` (mặc định) cũng tự phát hiện layout trên. Với dữ liệu phẳng,
-`--compression c23` dùng để đặt tên output/manifest; preprocessor không đòi hỏi
-thêm thư mục `c23` nếu video nằm trực tiếp trong mỗi folder.
-
-Tiếp tục tạo manifest Celeb-DF test như sau:
-
-```powershell
-python -m favit.preprocess celebdf `
+python -m favit_m2tr.preprocess celebdf `
   --root "D:\datasets\Celeb-DF-v2" `
   --output "data\processed" `
   --test-list "D:\datasets\Celeb-DF-v2\List_of_testing_videos.txt" `
   --frames 50
 ```
 
-Không dùng fallback detector: frame mà MTCNN không tìm được mặt sẽ bị ghi warning
-và loại khỏi manifest. Chạy lại không có `--overwrite` sẽ tái sử dụng crop đã có.
+Sửa đường dẫn dataset trong `configs/favit_m2tr_ffpp_c23_celebdf.yaml` trước khi train.
 
-## 4. Train FF++ C23
+## Train
 
-Sửa các đường dẫn trong
-[configs/favit_ffpp_c23_celebdf.yaml](configs/favit_ffpp_c23_celebdf.yaml), rồi:
-
-```powershell
-python train.py --config configs/favit_ffpp_c23_celebdf.yaml --device cuda:0
-```
-
-Sau mỗi epoch, vòng train chỉ đánh giá Celeb-DF-v2 test ở mức video, không chạy
-FF++ validation. `best.pt` được cập nhật khi **Celeb-DF test video AUC** tăng.
-Khi checkpoint tốt nhất được ghi, terminal sẽ hiện log `save_best_checkpoint`.
-
-Thiết lập theo paper:
-
-| Thành phần | Giá trị |
-|---|---:|
-| Backbone | ViT-B/16, ImageNet-21K, 12 block |
-| GAM | trong self-attention của cả 12 block |
-| LAM | trước block 1, 4, 7 (index `0,3,6`) |
-| Input | RGB `224x224`, normalize mean/std `0.5` |
-| Optimizer | Adam, LR `3e-5`, weight decay `1e-5` |
-| Scheduler | nhân `0.5` mỗi 5 epoch |
-| Batch | 32 ảnh = 16 cặp fake-real |
-| FAL | `m=0.25`, `eta=24` |
-| Tổng loss | epoch đầu CE; từ epoch 2: CE + FAL |
-
-Checkpoint `last.pt`, `best.pt` và lịch sử JSONL được ghi vào
-`outputs/favit_ffpp_c23/`.
-
-Để tiếp tục một lần train bị dừng, dùng `last.pt` (khuyến nghị vì đây là trạng
-thái của epoch mới nhất):
+Khởi tạo từ ViT ImageNet-21K:
 
 ```powershell
 python train.py `
-  --config configs/favit_ffpp_c23_celebdf.yaml `
-  --resume outputs/favit_ffpp_c23/last.pt `
+  --config configs/favit_m2tr_ffpp_c23_celebdf.yaml `
   --device cuda:0
 ```
 
-Cũng có thể đặt `train.resume` trong file YAML. Resume khôi phục model, optimizer,
-scheduler, AMP scaler, best Celeb-DF AUC và trạng thái random; `train.epochs`
-là tổng số epoch mục tiêu, không phải số epoch chạy thêm.
+Khuyến nghị khởi tạo toàn bộ phần FA-ViT dùng chung từ checkpoint baseline:
 
-## 5. Cross-test Celeb-DF-v2
+```powershell
+python train.py `
+  --config configs/favit_m2tr_ffpp_c23_celebdf.yaml `
+  --init-favit ..\fa_vit_remake\outputs\favit_ffpp_c23\best.pt `
+  --device cuda:0
+```
+
+Resume một run `favit_m2tr`:
+
+```powershell
+python train.py `
+  --config configs/favit_m2tr_ffpp_c23_celebdf.yaml `
+  --resume outputs\favit_m2tr_ffpp_c23\last.pt `
+  --device cuda:0
+```
+
+Config mặc định bắt đầu với batch 16 ảnh do bốn M2TR stage tăng activation memory.
+Batch phải là số chẵn vì FAL nhận các cặp fake-real.
+
+## Evaluate và test
 
 ```powershell
 python evaluate.py `
-  --config "configs\favit_ffpp_c23_celebdf.yaml" `
-  --checkpoint "outputs\favit_ffpp_c23\best.pt" `
+  --config configs/favit_m2tr_ffpp_c23_celebdf.yaml `
+  --checkpoint outputs\favit_m2tr_ffpp_c23\best.pt `
   --device cuda:0
-```
 
-Mỗi video dùng 50 frame. Xác suất fake được lấy bằng softmax rồi trung bình trong
-từng video; AUC và accuracy đều được tính ở mức video. Paper báo cáo **93.83%
-AUC** trên Celeb-DF-v2 khi train FF++ C23; đây là mốc đối chiếu, không phải giá
-trị được hard-code.
-
-## 6. Kiểm thử
-
-```powershell
 pytest
 ```
 
-Để sanity-check nhanh model không tải pretrained weights:
+Sanity check không tải pretrained weights:
 
 ```powershell
-python -c "from favit.model import create_favit; m=create_favit('vit_tiny_patch16_224', False); print(m.trainable_parameter_summary())"
+python -c "from favit_m2tr.model import create_favit_m2tr; m=create_favit_m2tr('vit_tiny_patch16_224', False, m2tr_channels=8, m2tr_depth=1); print(m.trainable_parameter_summary())"
 ```
 
-## Nguồn đối chiếu
-
-- [Mã FA-ViT chính thức](https://github.com/LoveSiameseCat/FAViT)
-- [FaceForensics++ chính thức](https://github.com/ondyari/FaceForensics)
-- [Celeb-DF-v2 chính thức](https://github.com/yuezunli/celeb-deepfakeforensics)
+Không có AUC nâng cấp nào được hard-code. Cần train/evaluate cùng split và seed để so
+sánh công bằng với FA-ViT gốc.

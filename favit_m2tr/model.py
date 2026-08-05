@@ -7,6 +7,8 @@ import timm
 import torch
 from torch import Tensor, nn
 
+from .m2tr import M2TRFeatureBranch
+
 
 class SeparableConv2d(nn.Module):
     def __init__(self, channels: int, kernel_size: int = 7, padding: int = 3) -> None:
@@ -223,8 +225,8 @@ class LocalInjector(nn.Module):
         return query + self.scale * self.output_norm(adapted)
 
 
-class ForgeryAwareViT(nn.Module):
-    """FA-ViT using a timm ViT backbone and paper/public-code adaptive modules."""
+class ForgeryAwareM2TRViT(nn.Module):
+    """FA-ViT augmented with M2TR multi-scale and frequency-domain context."""
 
     def __init__(
         self,
@@ -234,6 +236,13 @@ class ForgeryAwareViT(nn.Module):
         inject_layers: Sequence[int] = (0, 3, 6),
         train_backbone_norms: bool = True,
         train_cls_token: bool = True,
+        image_size: int = 224,
+        m2tr_channels: int = 64,
+        m2tr_depth: int = 4,
+        m2tr_patch_sizes: Sequence[int] | None = None,
+        m2tr_fusion_hidden_channels: int | None = None,
+        m2tr_fusion_pool_size: int | None = 14,
+        m2tr_dropout: float = 0.0,
     ) -> None:
         super().__init__()
         if not hasattr(backbone, "blocks") or not hasattr(backbone, "patch_embed"):
@@ -269,6 +278,23 @@ class ForgeryAwareViT(nn.Module):
         self.injectors = nn.ModuleList(
             LocalInjector(self.embed_dim, num_heads) for _ in self.inject_layers
         )
+        self.m2tr_branch = M2TRFeatureBranch(
+            input_channels=32,
+            embed_dim=self.embed_dim,
+            image_size=image_size,
+            channels=m2tr_channels,
+            depth=m2tr_depth,
+            patch_sizes=m2tr_patch_sizes,
+            fusion_hidden_channels=m2tr_fusion_hidden_channels,
+            fusion_pool_size=m2tr_fusion_pool_size,
+            dropout=m2tr_dropout,
+        )
+        # M2TR has an independent cross-attention path so that spatial LAM and
+        # frequency context can specialize. Zero scales preserve the initialized
+        # FA-ViT representation when loading a baseline checkpoint.
+        self.m2tr_injectors = nn.ModuleList(
+            LocalInjector(self.embed_dim, num_heads) for _ in self.inject_layers
+        )
         self._set_trainable_parameters(train_backbone_norms, train_cls_token)
 
     def _set_trainable_parameters(
@@ -286,7 +312,14 @@ class ForgeryAwareViT(nn.Module):
                         parameter.requires_grad = True
         if hasattr(self.backbone, "cls_token"):
             self.backbone.cls_token.requires_grad = train_cls_token
-        for module in (self.head, self.spatial_stem, self.spatial_blocks, self.injectors):
+        for module in (
+            self.head,
+            self.spatial_stem,
+            self.spatial_blocks,
+            self.injectors,
+            self.m2tr_branch,
+            self.m2tr_injectors,
+        ):
             for parameter in module.parameters():
                 parameter.requires_grad = True
 
@@ -302,6 +335,11 @@ class ForgeryAwareViT(nn.Module):
     def forward_features(self, images: Tensor) -> Tensor:
         spatial = self.spatial_stem(images)
         tokens = self._embed(images)
+        patch_tokens = tokens.shape[1] - 1
+        token_grid = math.isqrt(patch_tokens)
+        if token_grid * token_grid != patch_tokens:
+            raise ValueError(f"M2TR requires a square ViT token grid, got {patch_tokens}")
+        m2tr_tokens = self.m2tr_branch(spatial, token_grid)
         injection_index = 0
         for block_index, block in enumerate(self.backbone.blocks):
             if block_index in self.inject_layers:
@@ -311,6 +349,9 @@ class ForgeryAwareViT(nn.Module):
                         "spatial and ViT token grids differ; FA-ViT expects 224x224 inputs"
                     )
                 tokens = self.injectors[injection_index](tokens, spatial_tokens)
+                if m2tr_tokens.shape[1] != tokens.shape[1] - 1:
+                    raise ValueError("M2TR and ViT token grids differ")
+                tokens = self.m2tr_injectors[injection_index](tokens, m2tr_tokens)
                 injection_index += 1
             tokens = block(tokens)
         tokens = self.backbone.norm(tokens)
@@ -331,7 +372,7 @@ class ForgeryAwareViT(nn.Module):
         return {"total": total, "trainable": trainable, "frozen": total - trainable}
 
 
-def create_favit(
+def create_favit_m2tr(
     model_name: str = "vit_base_patch16_224.augreg_in21k",
     pretrained: bool = True,
     num_classes: int = 2,
@@ -339,13 +380,27 @@ def create_favit(
     inject_layers: Sequence[int] = (0, 3, 6),
     train_backbone_norms: bool = True,
     train_cls_token: bool = True,
-) -> ForgeryAwareViT:
+    image_size: int = 224,
+    m2tr_channels: int = 64,
+    m2tr_depth: int = 4,
+    m2tr_patch_sizes: Sequence[int] | None = None,
+    m2tr_fusion_hidden_channels: int | None = None,
+    m2tr_fusion_pool_size: int | None = 14,
+    m2tr_dropout: float = 0.0,
+) -> ForgeryAwareM2TRViT:
     backbone = timm.create_model(model_name, pretrained=pretrained, num_classes=0)
-    return ForgeryAwareViT(
+    return ForgeryAwareM2TRViT(
         backbone=backbone,
         num_classes=num_classes,
         gam_reduction=gam_reduction,
         inject_layers=inject_layers,
         train_backbone_norms=train_backbone_norms,
         train_cls_token=train_cls_token,
+        image_size=image_size,
+        m2tr_channels=m2tr_channels,
+        m2tr_depth=m2tr_depth,
+        m2tr_patch_sizes=m2tr_patch_sizes,
+        m2tr_fusion_hidden_channels=m2tr_fusion_hidden_channels,
+        m2tr_fusion_pool_size=m2tr_fusion_pool_size,
+        m2tr_dropout=m2tr_dropout,
     )

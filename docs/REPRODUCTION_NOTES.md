@@ -1,4 +1,7 @@
-# Ghi chú tái lập paper
+# Ghi chú tái lập FA-ViT baseline
+
+Tài liệu này mô tả phần FA-ViT được kế thừa từ `fa_vit_remake`. Các quyết định
+tích hợp M2TR mới được ghi riêng trong [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Phần được paper chỉ định rõ
 

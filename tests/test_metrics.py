@@ -1,4 +1,4 @@
-from favit.metrics import video_level_metrics
+from favit_m2tr.metrics import video_level_metrics
 
 
 def test_video_scores_are_averaged_before_metrics():
@@ -10,4 +10,3 @@ def test_video_scores_are_averaged_before_metrics():
     assert metrics["video_auc"] == 1.0
     assert metrics["video_accuracy"] == 1.0
     assert metrics["num_videos"] == 2
-

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from favit.preprocess import resolve_ffpp_directories
+from favit_m2tr.preprocess import resolve_ffpp_directories
 
 
 PAPER_METHODS = ["Deepfakes", "Face2Face", "FaceSwap", "NeuralTextures"]
@@ -32,4 +32,3 @@ def test_auto_prefers_official_layout_when_present(tmp_path):
         )
     _, _, layout = resolve_ffpp_directories(tmp_path, "c23", PAPER_METHODS, "auto")
     assert layout == "official"
-

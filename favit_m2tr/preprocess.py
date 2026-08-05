@@ -13,7 +13,7 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-LOGGER = logging.getLogger("favit.preprocess")
+LOGGER = logging.getLogger("favit_m2tr.preprocess")
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 
 
